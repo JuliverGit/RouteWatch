@@ -1,0 +1,25 @@
+{
+  "name": "routewatch-server",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch index.js",
+    "start": "node index.js",
+    "seed-user": "node seed-user.js",
+    "reset-password": "node reset-password.js",
+    "seed-device": "node seed-device.js",
+    "seed-simulator": "node seed-device.js --simulator",
+    "simulate": "node simulator.js",
+    "check-route": "node check-route.js",
+    "db:migrate": "node migrate.js",
+    "db:import": "node import-json.js",
+    "db:check": "node db-check.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^18.0.10",
+    "express": "^4.19.2",
+    "pg": "^8.23.1",
+    "socket.io": "^4.7.5"
+  }
+}
