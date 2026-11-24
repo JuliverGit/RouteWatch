@@ -1959,6 +1959,13 @@ export default function App() {
   const [checking, setChecking] = useState(true);
   const [notice, setNotice] = useState("");
   const isMember = !!user && user.role !== "guest"; // guests are unauthenticated, public-map-only visitors
+  // Notifications belong to one identity. Reset while rendering (not in an effect), so a frame with the previous user's content is never painted.
+  // Clearing the toast also cancels its dismissal timer (the cleanup of the toast effect below).
+  const identity = user?.username ?? null;
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
+  const [notifOwner, setNotifOwner] = useState(identity);
+  if (notifOwner !== identity) { setNotifOwner(identity); setToast(""); setNotif({ unread: 0, items: null, error: "" }); }
   const clearMapFocus = useCallback(() => { setMapFocus(null); setFocusToken(0); }, []);
   useEffect(() => { clearMapFocus(); }, [user?.username, clearMapFocus]); // a map focus belongs to one user: log out, expiry and account changes drop it
 
@@ -2004,15 +2011,18 @@ export default function App() {
 
   const loadNotif = useCallback(async () => {
     if (!isMember) return;
+    const askedFor = identityRef.current, stale = () => identityRef.current !== askedFor; // a late answer for a previous user is dropped
     try {
       const r = await fetch("/api/notifications", { credentials: "same-origin" });
+      if (stale()) return;
       if (r.status === 401) return expire();
       const d = await r.json().catch(() => null);
+      if (stale()) return;
       if (!r.ok || !d || !Array.isArray(d.notifications)) return setNotif((p) => ({ ...p, error: "Notifications could not be loaded." }));
       setNotif({ unread: d.unread, items: d.notifications, error: "" });
-    } catch { setNotif((p) => ({ ...p, error: "Cannot reach the server." })); }
+    } catch { if (!stale()) setNotif((p) => ({ ...p, error: "Cannot reach the server." })); }
   }, [isMember, expire]);
-  useEffect(() => { if (!isMember) { setNotif({ unread: 0, items: null, error: "" }); return; } loadNotif(); const t = setInterval(loadNotif, 60000); return () => clearInterval(t); }, [isMember, loadNotif]);
+  useEffect(() => { if (!isMember) { setNotif({ unread: 0, items: null, error: "" }); return; } loadNotif(); const t = setInterval(loadNotif, 60000); return () => clearInterval(t); }, [isMember, identity, loadNotif]);
   // One Socket.IO connection for the app. The server sends "notification" only to this user's own room; "alerts:changed" carries no content.
   useEffect(() => {
     if (!user) return;
