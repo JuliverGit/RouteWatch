@@ -6,8 +6,9 @@ import { mapFocusSuite } from "./map-focus.suite.mjs";
 import { notificationSessionSuite } from "./notification-session.suite.mjs";
 import { lateResponseSuite } from "./late-response.suite.mjs";
 import { sessionIdleSuite } from "./session-idle.suite.mjs";
+import { staleDataSuite } from "./stale-data.suite.mjs";
 
-const SUITES = { roles: rolesSuite, "session-idle": sessionIdleSuite, "map-focus": mapFocusSuite, "notification-session": notificationSessionSuite, "late-response": lateResponseSuite };
+const SUITES = { roles: rolesSuite, "session-idle": sessionIdleSuite, "map-focus": mapFocusSuite, "notification-session": notificationSessionSuite, "late-response": lateResponseSuite, "stale-data": staleDataSuite };
 const filter = process.argv[2];
 const chosen = Object.entries(SUITES).filter(([name]) => !filter || name.includes(filter));
 if (!chosen.length) { console.error(`No suite matches "${filter}". Suites: ${Object.keys(SUITES).join(", ")}`); process.exit(2); }

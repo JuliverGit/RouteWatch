@@ -146,9 +146,12 @@ export async function withStack(fn) {
       await createUser(a.username, a.password, role);
       accounts[role] = a;
     }
-    const second = { username: `rwt-pax2-${run}`, password: `Pw-${crypto.randomBytes(12).toString("base64url")}`, role: "passenger" };
-    await createUser(second.username, second.password, "passenger");
-    accounts.passenger2 = second;
+    // A second account of the same role, for account switches where the open page stays allowed.
+    for (const [key, prefix, role] of [["passenger2", "pax2", "passenger"], ["admin2", "adm2", "admin"], ["conductor2", "con2", "conductor"]]) {
+      const a = { username: `rwt-${prefix}-${run}`, password: `Pw-${crypto.randomBytes(12).toString("base64url")}`, role };
+      await createUser(a.username, a.password, role);
+      accounts[key] = a;
+    }
     let live = [];
     for (let i = 0; i < 40 && !live.length; i++) { live = (await api("GET", "/api/tracking/buses")).data.filter((b) => b.pos && ["current", "delayed"].includes(b.status)); if (!live.length) await sleep(500); }
     await fn({ browser, accounts, query, live });

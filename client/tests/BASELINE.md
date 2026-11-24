@@ -41,12 +41,13 @@ Recorded 2026-11-24 on Windows 11, Node 24.15.0, Microsoft Edge 158.0.4370.33, P
 Not covered: a conductor **assigned** to a bus (the test conductor is unassigned, so real assignments are not disturbed), real Google
 sign-in, real email delivery, Firefox, Safari, and physical phones.
 
-## Current reference (after the idle-session, map-focus, notification-session and late-response fixes)
+## Current reference (after the idle-session, map-focus, notification-session, late-response and stale-data fixes)
 
 This is the result later refactoring phases should keep. The baseline above is kept as the record of the code before the fixes.
 
-- Production build: passed. `index.html` 0.35 kB, CSS 42.04 kB (unchanged), JS 487.01 kB (gzip 142.16 kB).
-- Smoke tests: **222 passed, 0 failed, 0 known issues**.
+- Production build: passed. `index.html` 0.35 kB, CSS 42.04 kB (unchanged), JS 487.04 kB (gzip 142.17 kB).
+- Smoke tests: **281 passed, 0 failed, 0 known issues**.
+- The tests now also create a second temporary admin and a second temporary conductor (`rwt-adm2-*`, `rwt-con2-*`), deleted afterwards.
 
 ### Fixed since the baseline
 
@@ -60,3 +61,7 @@ This is the result later refactoring phases should keep. The baseline above is k
 4. **Late responses from an earlier session.** A delayed 401 could sign out the next user, and a delayed `/api/me` success could put
    the previous user back on screen. Before the fix the suite had 22 failed checks among the 25 it reached before crashing. It now
    passes 31 of 31 (`late-response.suite.mjs`). Delayed responses in this suite are held and answered inside the page.
+5. **Previous account's page data in the next session.** When the account changed while a page stayed open, that page kept showing
+   the previous account's data, and its delayed responses could still replace the new account's data (for example staff dashboard
+   sections shown to a passenger). Before the fix the suite gave 49 passed and 10 failed, on all nine data pages. It now passes 59 of
+   59 (`stale-data.suite.mjs`). Responses are labelled inside the page, and the conductors' assigned bus is made up there too.

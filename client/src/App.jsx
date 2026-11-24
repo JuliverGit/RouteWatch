@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, TileLayer, Polyline, CircleMarker, Circle, Marker, Tooltip, Popup, useMap } from "react-leaflet";
 import { RADIUS_OPTIONS, DEFAULT_RADIUS_M, POOR_ACCURACY_M, isLatLng, haversineMeters, formatDistance, formatRadius, hasLivePosition, findNearby, locationProblem } from "./geo.js";
 import L from "leaflet";
@@ -2115,7 +2115,9 @@ export default function App() {
               </button>)}
           </span></header>
         {toast && <div className="toast" role="status"><button className="toast__btn" onClick={() => { setToast(""); setView("notifications"); }}>{toast}</button></div>}
-        {page}
+        {/* Page data belongs to one identity: a new `epoch` replaces the page in the same render that shows the new account,
+            so the previous account's data is never painted and its late responses reach an unmounted page (React drops them). */}
+        <Fragment key={epoch}>{page}</Fragment>
       </main>
     </div>
   );
