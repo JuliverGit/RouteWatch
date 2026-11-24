@@ -3,42 +3,12 @@ import { MapContainer, TileLayer, Polyline, CircleMarker, Circle, Marker, Toolti
 import { RADIUS_OPTIONS, DEFAULT_RADIUS_M, POOR_ACCURACY_M, isLatLng, haversineMeters, formatDistance, formatRadius, hasLivePosition, findNearby, locationProblem } from "./geo.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { io } from "socket.io-client";
 import AuthScreen from "./Auth.jsx";
 import { announceSessionChange, onSessionChange } from "./sessionSync.js";
 import { fmt, ago, timeFmt, dateTime, brief, coordText, initials } from "./utils/format.js";
 import { TRACK, BUS_STATUS, SEV, ASTATE } from "./utils/status.js";
 import { send, post, getJson } from "./services/http.js";
-
-// ONE Socket.IO connection for the whole page, shared by every screen that needs live data. Each screen calls joinSocket(), adds
-// its handlers with .on() and releases them with .disconnect() (which removes only ITS handlers). The real connection closes when the
-// last screen leaves. The server reads the session cookie when a connection is made, so when the signed-in user changes
-// (sign-in, sign-out) the connection is made again to carry the new identity.
-let sharedSocket = null, sharedUsers = 0, sharedIdentity = null, sharedCloseTimer = null;
-function joinSocket() {
-  clearTimeout(sharedCloseTimer);
-  if (!sharedSocket) sharedSocket = io();
-  else if (!sharedSocket.active) sharedSocket.connect(); // the server ended it (sign-out): connect again with the cookie the browser holds now
-  const s = sharedSocket, mine = [];
-  let left = false;
-  sharedUsers++;
-  return {
-    on(event, fn) { mine.push([event, fn]); s.on(event, fn); if (event === "connect" && s.connected) fn(); return this; },
-    disconnect() {
-      if (left) return;
-      left = true;
-      for (const [event, fn] of mine) s.off(event, fn);
-      // Close after a short pause, so moving from one screen to another reuses the same connection.
-      if (--sharedUsers === 0) sharedCloseTimer = setTimeout(() => { if (sharedUsers === 0) { s.disconnect(); if (sharedSocket === s) sharedSocket = null; } }, 1500);
-    },
-  };
-}
-function setSocketIdentity(name) {
-  if (sharedIdentity === name) return;
-  const first = sharedIdentity === null;
-  sharedIdentity = name;
-  if (!first && sharedSocket) { sharedSocket.disconnect(); sharedSocket.connect(); }
-}
+import { joinSocket, setSocketIdentity, reconnectIfDropped } from "./services/socket.js"; // the one shared Socket.IO connection
 import { Bus, Map as MapIcon, LayoutDashboard, LogOut, Bell, MapPin, Clock, Users, ScrollText, Radio, Route as RouteIcon, ArrowUp, ArrowDown, Ticket, Plus, Minus, Megaphone, CheckCheck, LocateFixed } from "lucide-react";
 
 const busIcon = (id, status, mine = false, selected = false) => L.divIcon({ className: "", html: `<div class="bus-pin bus-pin--${status}${mine ? " bus-pin--mine" : ""}${selected ? " bus-pin--sel" : ""}">${id.slice(-2)}</div>${mine ? '<span class="bus-tag">MY BUS</span>' : ""}`, iconSize: [32, 32], iconAnchor: [16, 16] });
@@ -1996,7 +1966,7 @@ export default function App() {
         if (epochRef.current !== asked) return;
         // The server may have ended our live connection although nothing changed in the end (a role changed and changed back): connect again.
         // When the account or role did change, the new identity reconnects it anyway (setSocketIdentity).
-        if (shown && shown.username === u.username && shown.role === u.role && sharedSocket && !sharedSocket.active && sharedUsers > 0) sharedSocket.connect();
+        if (shown && shown.username === u.username && shown.role === u.role) reconnectIfDropped();
         setUser((prev) => (prev && JSON.stringify(prev) === JSON.stringify(u) ? prev : u));
         if (!member) { setNotice(""); setView("dash"); } // a sign-in made in another tab
       })
