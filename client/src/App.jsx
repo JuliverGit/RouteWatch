@@ -9,6 +9,10 @@ import { fmt, ago, timeFmt, dateTime, brief, coordText, initials } from "./utils
 import { TRACK, BUS_STATUS, SEV, ASTATE } from "./utils/status.js";
 import { send, post, getJson } from "./services/http.js";
 import { joinSocket, setSocketIdentity, reconnectIfDropped } from "./services/socket.js"; // the one shared Socket.IO connection
+import { Badge, OccBadge } from "./components/ui/Badge.jsx";
+import { State } from "./components/ui/State.jsx";
+import { Modal, Confirm } from "./components/ui/Modal.jsx";
+import { Field } from "./components/ui/Field.jsx";
 import { Bus, Map as MapIcon, LayoutDashboard, LogOut, Bell, MapPin, Clock, Users, ScrollText, Radio, Route as RouteIcon, ArrowUp, ArrowDown, Ticket, Plus, Minus, Megaphone, CheckCheck, LocateFixed } from "lucide-react";
 
 const busIcon = (id, status, mine = false, selected = false) => L.divIcon({ className: "", html: `<div class="bus-pin bus-pin--${status}${mine ? " bus-pin--mine" : ""}${selected ? " bus-pin--sel" : ""}">${id.slice(-2)}</div>${mine ? '<span class="bus-tag">MY BUS</span>' : ""}`, iconSize: [32, 32], iconAnchor: [16, 16] });
@@ -38,13 +42,6 @@ const VIEWS = [
   { id: "users", label: "Users", Icon: Users, permission: "users:read", group: "Administration" },
   { id: "audit", label: "Audit log", Icon: ScrollText, permission: "audit:read", group: "Administration" },
 ];
-
-// Passenger occupancy as the server reports it (real count kept by the bus's conductor). "Not reported" is shown as such, never as 0.
-const OccBadge = ({ occ }) => (occ && occ.reported ? <Badge tone={occ.tone}>{occ.count}/{occ.capacity} · {occ.label}</Badge> : <Badge tone="off">Occupancy not reported</Badge>);
-const Badge = ({ tone, children }) => <span className={`badge badge--${tone}`}>{children}</span>;
-const State = ({ title, text, action }) => (
-  <div className="state" role="status"><h2>{title}</h2><p>{text}</p>{action}</div>
-);
 
 // Sign-in, registration, email verification and password recovery live in Auth.jsx (same props as before).
 const Login = (props) => <AuthScreen {...props} />;
@@ -1132,45 +1129,6 @@ function ConductorHome({ onUnauthorized, onNavigate, onShowMap, onFocus, alertsT
 // (buses:manage / buses:read); the buttons are hidden for dispatchers only so the screen matches.
 const EMPTY_BUS = { busId: "", name: "", plate: "", capacity: "", model: "", status: "active", simulatedGps: true };
 
-function Modal({ title, onClose, children, labelledBy }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const prev = document.activeElement;
-    const first = ref.current?.querySelector("input:not([disabled]), textarea:not([disabled]), select, button");
-    first?.focus();
-    const key = (e) => {
-      if (e.key === "Escape") return onClose();
-      if (e.key !== "Tab") return; // keep keyboard focus inside the dialog
-      const f = [...ref.current.querySelectorAll("input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])")];
-      if (!f.length) return;
-      const a = f[0], z = f[f.length - 1];
-      if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); }
-      else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); }
-    };
-    document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("keydown", key); prev?.focus?.(); };
-  }, [onClose]);
-  return (
-    <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby={labelledBy} ref={ref}>
-        <h2 id={labelledBy}>{title}</h2>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Field({ id, label, error, hint, children }) {
-  return (
-    <div className="field">
-      <label htmlFor={id}>{label}</label>
-      {children}
-      {hint && !error && <span className="muted small small--tight" id={`${id}-hint`}>{hint}</span>}
-      {error && <span className="field-error" id={`${id}-err`} role="alert">{error}</span>}
-    </div>
-  );
-}
-
 function BusForm({ bus, routes, onSaved, onCancel, onUnauthorized }) {
   const editing = !!bus;
   const [f, setF] = useState(editing ? { ...EMPTY_BUS, ...bus, plate: bus.plate ?? "", model: bus.model ?? "", capacity: String(bus.capacity ?? ""), simulatedGps: bus.source === "simulation", routeId: bus.routeId ?? "" } : { ...EMPTY_BUS, routeId: "" });
@@ -1377,18 +1335,6 @@ function BusesPage({ onUnauthorized }) {
 // ---- Routes and bus stops ----
 // Same rules as Bus Management: administrators change records, dispatchers only look, passengers see only the map.
 // The server enforces it (routes:manage / stops:manage); hidden buttons just keep the screen consistent.
-
-function Confirm({ title, children, label, busy, onCancel, onConfirm, danger = true }) {
-  return (
-    <Modal title={title} onClose={onCancel} labelledBy="h-confirm">
-      {children}
-      <div className="modal__actions">
-        <button className="btn" onClick={onCancel}>Cancel</button>
-        <button className={`btn ${danger ? "btn--danger" : "btn--primary"}`} disabled={busy} onClick={onConfirm}>{busy ? "Working…" : label}</button>
-      </div>
-    </Modal>
-  );
-}
 
 /** Loads several staff endpoints together and polls them. Returns [data, error, reload]. */
 function useStaffData(urls, onUnauthorized, every = 8000) {
