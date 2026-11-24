@@ -1961,16 +1961,34 @@ export default function App() {
   const isMember = !!user && user.role !== "guest"; // guests are unauthenticated, public-map-only visitors
   // Notifications belong to one identity. Reset while rendering (not in an effect), so a frame with the previous user's content is never painted.
   // Clearing the toast also cancels its dismissal timer (the cleanup of the toast effect below).
+  // `epoch` numbers each identity on screen, so a response can be tied to the one that asked for it, even when the same user signs in again.
   const identity = user?.username ?? null;
-  const identityRef = useRef(identity);
-  identityRef.current = identity;
-  const [notifOwner, setNotifOwner] = useState(identity);
-  if (notifOwner !== identity) { setNotifOwner(identity); setToast(""); setNotif({ unread: 0, items: null, error: "" }); }
+  const [session, setSession] = useState({ identity, epoch: 0 });
+  const epoch = session.identity === identity ? session.epoch : session.epoch + 1;
+  const epochRef = useRef(epoch);
+  epochRef.current = epoch;
+  if (session.identity !== identity) { setSession({ identity, epoch }); setToast(""); setNotif({ unread: 0, items: null, error: "" }); }
   const clearMapFocus = useCallback(() => { setMapFocus(null); setFocusToken(0); }, []);
   useEffect(() => { clearMapFocus(); }, [user?.username, clearMapFocus]); // a map focus belongs to one user: log out, expiry and account changes drop it
 
   const endSession = useCallback((message = "") => { setUser(null); setView("dash"); setNotice(message); }, []);
-  const expire = useCallback(() => endSession("Your session has expired. Please sign in again."), [endSession]);
+  // Every page reports a 401 through the `expire` of the identity that made the request. A report from an earlier identity is ignored.
+  // Otherwise the server decides: the cookie may already belong to a newer session (a sign-in in another tab), so only a 401 from /api/me ends this one.
+  const confirmingExpiry = useRef(null);
+  const expire = useCallback(() => {
+    if (epochRef.current !== epoch || confirmingExpiry.current === epoch) return;
+    confirmingExpiry.current = epoch;
+    fetch("/api/me", { credentials: "same-origin" })
+      .then(async (r) => {
+        if (epochRef.current !== epoch) return;
+        if (r.status === 401) return endSession("Your session has expired. Please sign in again.");
+        if (!r.ok) return;
+        const u = await r.json();
+        if (epochRef.current === epoch) setUser((prev) => (JSON.stringify(prev) === JSON.stringify(u) ? prev : u));
+      })
+      .catch(() => {}) // server unreachable: not proof the session ended; the next request or session check decides
+      .finally(() => { if (confirmingExpiry.current === epoch) confirmingExpiry.current = null; });
+  }, [epoch, endSession]);
 
   // Restore an existing server session (e.g. after a page refresh).
   useEffect(() => {
@@ -1989,20 +2007,21 @@ export default function App() {
     const t = setInterval(() => {
       fetch("/api/me", { credentials: "same-origin" })
         .then(async (r) => {
+          if (epochRef.current !== epoch) return; // answer for an earlier identity
           if (r.status === 401) return expire();
-          if (r.ok) { const u = await r.json(); setUser((prev) => (JSON.stringify(prev) === JSON.stringify(u) ? prev : u)); }
+          if (r.ok) { const u = await r.json(); if (epochRef.current === epoch) setUser((prev) => (JSON.stringify(prev) === JSON.stringify(u) ? prev : u)); }
         })
         .catch(() => {});
     }, 60000);
     return () => clearInterval(t);
-  }, [isMember, expire]);
+  }, [isMember, epoch, expire]);
 
   // The dashboard response says who the server thinks we are; if our role changed, reload the account.
   const syncViewer = useCallback((v) => {
     if (user && v.role !== user.role) {
-      fetch("/api/me", { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).then((u) => { if (u) setUser(u); }).catch(() => {});
+      fetch("/api/me", { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).then((u) => { if (u && epochRef.current === epoch) setUser(u); }).catch(() => {});
     }
-  }, [user]);
+  }, [user, epoch]);
 
   const logout = async () => {
     if (isMember) { try { await post("/api/logout"); } catch { /* the cookie also expires on its own */ } }
@@ -2011,7 +2030,7 @@ export default function App() {
 
   const loadNotif = useCallback(async () => {
     if (!isMember) return;
-    const askedFor = identityRef.current, stale = () => identityRef.current !== askedFor; // a late answer for a previous user is dropped
+    const askedFor = epochRef.current, stale = () => epochRef.current !== askedFor; // a late answer for a previous session is dropped
     try {
       const r = await fetch("/api/notifications", { credentials: "same-origin" });
       if (stale()) return;

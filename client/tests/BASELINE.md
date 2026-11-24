@@ -41,12 +41,12 @@ Recorded 2026-11-24 on Windows 11, Node 24.15.0, Microsoft Edge 158.0.4370.33, P
 Not covered: a conductor **assigned** to a bus (the test conductor is unassigned, so real assignments are not disturbed), real Google
 sign-in, real email delivery, Firefox, Safari, and physical phones.
 
-## Current reference (after the idle-session, map-focus and notification-session fixes)
+## Current reference (after the idle-session, map-focus, notification-session and late-response fixes)
 
 This is the result later refactoring phases should keep. The baseline above is kept as the record of the code before the fixes.
 
-- Production build: passed. `index.html` 0.35 kB, CSS 42.04 kB (unchanged), JS 486.53 kB (gzip 142.05 kB).
-- Smoke tests: **191 passed, 0 failed, 0 known issues**.
+- Production build: passed. `index.html` 0.35 kB, CSS 42.04 kB (unchanged), JS 487.01 kB (gzip 142.16 kB).
+- Smoke tests: **222 passed, 0 failed, 0 known issues**.
 
 ### Fixed since the baseline
 
@@ -57,3 +57,6 @@ This is the result later refactoring phases should keep. The baseline above is k
 3. **Notification leak between users.** A toast, the notification list or a late response could reach the next user in the same tab,
    and the previous user's timer could dismiss the next user's toast. The suite gave 22 passed and 12 failed before the fix and passes
    now (`notification-session.suite.mjs`). Notifications in this suite are simulated frames through the real Socket.IO client.
+4. **Late responses from an earlier session.** A delayed 401 could sign out the next user, and a delayed `/api/me` success could put
+   the previous user back on screen. Before the fix the suite had 22 failed checks among the 25 it reached before crashing. It now
+   passes 31 of 31 (`late-response.suite.mjs`). Delayed responses in this suite are held and answered inside the page.
