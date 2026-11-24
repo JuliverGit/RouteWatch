@@ -6,6 +6,7 @@ import "leaflet/dist/leaflet.css";
 import { io } from "socket.io-client";
 import AuthScreen from "./Auth.jsx";
 import { announceSessionChange, onSessionChange } from "./sessionSync.js";
+import { fmt, ago, timeFmt, dateTime, brief, coordText, initials } from "./utils/format.js";
 
 // ONE Socket.IO connection for the whole page, shared by every screen that needs live data. Each screen calls joinSocket(), adds
 // its handlers with .on() and releases them with .disconnect() (which removes only ITS handlers). The real connection closes when the
@@ -38,7 +39,6 @@ function setSocketIdentity(name) {
 }
 import { Bus, Map as MapIcon, LayoutDashboard, LogOut, Bell, MapPin, Clock, Users, ScrollText, Radio, Route as RouteIcon, ArrowUp, ArrowDown, Ticket, Plus, Minus, Megaphone, CheckCheck, LocateFixed } from "lucide-react";
 
-const fmt = (s) => (s == null ? "–" : s < 60 ? `${s} sec` : `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} sec` : ""}`);
 // How fresh a bus position is (decided by the server): current, delayed, stale (last known) or unavailable.
 const TRACK = { current: { label: "Live", tone: "ok" }, delayed: { label: "Delayed", tone: "warn" }, stale: { label: "Last known", tone: "bad" }, unavailable: { label: "Unavailable", tone: "off" } };
 // Operational status of a bus (set by an administrator). This is NOT the GPS tracking status above.
@@ -48,7 +48,6 @@ const busIcon = (id, status, mine = false, selected = false) => L.divIcon({ clas
 const meIcon = L.divIcon({ className: "", html: '<div class="me-dot" aria-hidden="true"></div>', iconSize: [22, 22], iconAnchor: [11, 11] });
 const sourceLabel = (src) => (src === "gps" ? "GPS device" : src === "simulation" ? "Simulated GPS (not real)" : "No tracking device");
 const direction = (b) => (b.dir === 1 ? "To CDO" : b.dir === -1 ? "To Villanueva" : "Direction unknown");
-const ago = (s) => (s == null ? "No data yet" : s < 60 ? `${s} sec ago` : `${Math.floor(s / 60)} min ago`);
 const nextStopOf = (b, stops) => {
   let best = null;
   (b.etas || []).forEach((e, i) => { if (e != null && (!best || e < best.eta)) best = { name: stops[i]?.name, eta: e }; });
@@ -76,7 +75,6 @@ const VIEWS = [
   { id: "audit", label: "Audit log", Icon: ScrollText, permission: "audit:read", group: "Administration" },
 ];
 
-const initials = (name) => (String(name).match(/[a-z0-9]/gi) || ["?"]).slice(0, 2).join("").toUpperCase();
 // Passenger occupancy as the server reports it (real count kept by the bus's conductor). "Not reported" is shown as such, never as 0.
 const OccBadge = ({ occ }) => (occ && occ.reported ? <Badge tone={occ.tone}>{occ.count}/{occ.capacity} · {occ.label}</Badge> : <Badge tone="off">Occupancy not reported</Badge>);
 const Badge = ({ tone, children }) => <span className={`badge badge--${tone}`}>{children}</span>;
@@ -566,8 +564,6 @@ function LiveMap({ canFleet, isConductor = false, isPassenger = false, focusToke
   );
 }
 
-const timeFmt = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-
 // A value of null means "not available yet", which is shown differently from a real 0.
 function Stat({ label, value, note }) {
   const unavailable = value == null;
@@ -834,8 +830,6 @@ function CounterPage({ onUnauthorized }) {
 // only show what the server returns for the signed-in user (or visitor) and send the user's actions back.
 const SEV = { info: { tone: "info", label: "Information" }, warning: { tone: "warn", label: "Warning" }, critical: { tone: "bad", label: "Critical" } };
 const ASTATE = { draft: { tone: "off", label: "Draft" }, active: { tone: "ok", label: "Active" }, expired: { tone: "off", label: "Expired" }, resolved: { tone: "off", label: "Resolved" } };
-const dateTime = (iso) => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-const brief = (t, n = 120) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 
 /** Buttons that jump to the bus, route or stop an alert is about (the map does the rest). */
 function AlertLinks({ alert, onFocus }) {
@@ -1465,8 +1459,6 @@ async function change(method, url, body, onUnauthorized, setFeedback, okText) {
     return d;
   } catch { setFeedback({ ok: false, text: "Cannot reach the server." }); return null; }
 }
-
-const coordText = (n) => (n == null ? "–" : Number(n).toFixed(5));
 
 function StopForm({ stop, onSaved, onCancel, onUnauthorized }) {
   const editing = !!stop;
