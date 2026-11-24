@@ -2,10 +2,10 @@
 //                        npm run test:smoke -- roles   (only suites whose name contains "roles")
 import { withStack, results } from "./harness.mjs";
 import { rolesSuite } from "./roles.suite.mjs";
-import { knownIssuesSuite } from "./known-issues.suite.mjs";
+import { mapFocusSuite } from "./map-focus.suite.mjs";
 import { sessionIdleSuite } from "./session-idle.suite.mjs";
 
-const SUITES = { roles: rolesSuite, "session-idle": sessionIdleSuite, "known-issues": knownIssuesSuite };
+const SUITES = { roles: rolesSuite, "session-idle": sessionIdleSuite, "map-focus": mapFocusSuite };
 const filter = process.argv[2];
 const chosen = Object.entries(SUITES).filter(([name]) => !filter || name.includes(filter));
 if (!chosen.length) { console.error(`No suite matches "${filter}". Suites: ${Object.keys(SUITES).join(", ")}`); process.exit(2); }

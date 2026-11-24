@@ -179,7 +179,7 @@ function usePassengerLocation(enabled) {
   return { ...loc, permission, start, stop };
 }
 
-function LiveMap({ canFleet, isConductor = false, isPassenger = false, focusToken = 0, alertsTick = 0, mapFocus = null }) {
+function LiveMap({ canFleet, isConductor = false, isPassenger = false, focusToken = 0, alertsTick = 0, mapFocus = null, onFocusUsed }) {
   const [route, setRoute] = useState(null);
   const [myBusId, setMyBusId] = useState(null);   // the bus the SERVER says this conductor is assigned to (never chosen by the browser)
   const [myChecked, setMyChecked] = useState(!isConductor);
@@ -187,7 +187,12 @@ function LiveMap({ canFleet, isConductor = false, isPassenger = false, focusToke
   const svcAlerts = useActiveAlerts(alertsTick);        // active service alerts meant for this viewer (the server filters them)
   const [focus, setFocus] = useState(null);             // { kind: "bus" | "route" | "stop", id, token }: what an alert asked the map to show
   const seq = useRef(0);
-  useEffect(() => { if (mapFocus?.token) setFocus({ kind: mapFocus.kind, id: mapFocus.id, token: ++seq.current }); }, [mapFocus?.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [myBusFocus] = useState(focusToken); // a "View my bus" request, kept here because App clears it once this map has it
+  // A focus request is one-shot: take it, then tell App to forget it, so coming back to the map later does not replay it.
+  useEffect(() => {
+    if (mapFocus?.token) setFocus({ kind: mapFocus.kind, id: mapFocus.id, token: ++seq.current });
+    if (mapFocus?.token || focusToken) onFocusUsed?.();
+  }, [mapFocus?.token, focusToken]); // eslint-disable-line react-hooks/exhaustive-deps
   const focusOn = useCallback((kind, id) => setFocus({ kind, id, token: ++seq.current }), []);
   const [failed, setFailed] = useState(false);
   const [buses, setBuses] = useState(null);
@@ -472,7 +477,7 @@ function LiveMap({ canFleet, isConductor = false, isPassenger = false, focusToke
           {roadRoute && <Polyline positions={route.path} pathOptions={{ color: "#0b5cab", weight: 4, opacity: 0.85 }} />}
           {selLine && <Polyline positions={selLine.path} pathOptions={straightShown ? { color: "#b45309", weight: 3, opacity: 0.9, dashArray: "8 8" } : { color: "#b45309", weight: 5, opacity: 0.85 }} />}
           {selRoute && selRoute.stops.length > 0 && <Fit key={selRoute.routeId} points={selRoute.stops.map((x) => [x.lat, x.lng])} />}
-          {mine && <FlyTo pos={mine.pos} token={Math.max(focusToken, 0) + localFocus} />}
+          {mine && <FlyTo pos={mine.pos} token={Math.max(myBusFocus, 0) + localFocus} />}
           {focus && <FlyTo pos={focusPos} token={focus.token} />}
           {isPassenger && <FlyTo pos={me.pos} token={meToken} />}
           {isPassenger && picked.id && <FocusBus id={picked.id} pos={pickedLive?.pos ?? null} token={picked.token} markers={markers} />}
@@ -1954,6 +1959,8 @@ export default function App() {
   const [checking, setChecking] = useState(true);
   const [notice, setNotice] = useState("");
   const isMember = !!user && user.role !== "guest"; // guests are unauthenticated, public-map-only visitors
+  const clearMapFocus = useCallback(() => { setMapFocus(null); setFocusToken(0); }, []);
+  useEffect(() => { clearMapFocus(); }, [user?.username, clearMapFocus]); // a map focus belongs to one user: log out, expiry and account changes drop it
 
   const endSession = useCallback((message = "") => { setUser(null); setView("dash"); setNotice(message); }, []);
   const expire = useCallback(() => endSession("Your session has expired. Please sign in again."), [endSession]);
@@ -2044,7 +2051,7 @@ export default function App() {
   const page = !allowed(current) ? (
     <State title="Access denied" text={`Your role (${ROLE_LABEL[user.role] ?? "unknown"}) does not have permission to view this page.`}
       action={<button className="btn" onClick={() => setView("dash")}>Back to dashboard</button>} />
-  ) : current.id === "map" ? <LiveMap canFleet={(user.permissions ?? []).includes("fleet:view")} isConductor={isConductor} isPassenger={user.role === "passenger"}focusToken={focusToken} alertsTick={alertsTick} mapFocus={mapFocus} />
+  ) : current.id === "map" ? <LiveMap key={user.username} canFleet={(user.permissions ?? []).includes("fleet:view")} isConductor={isConductor} isPassenger={user.role === "passenger"} focusToken={focusToken} alertsTick={alertsTick} mapFocus={mapFocus} onFocusUsed={clearMapFocus} />
     : current.id === "notifications" ? <NotificationsPage notif={notif} onRead={readOne} onReadAll={readAll} onFocus={showOnMap} onManage={canAlerts ? () => setView("alerts") : null} reload={loadNotif} />
     : current.id === "alerts" ? <AlertsPage onUnauthorized={expire} alertsTick={alertsTick} />
     : current.id === "counter" ? <CounterPage onUnauthorized={expire} />

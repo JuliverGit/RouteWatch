@@ -41,15 +41,16 @@ Recorded 2026-11-24 on Windows 11, Node 24.15.0, Microsoft Edge 158.0.4370.33, P
 Not covered: a conductor **assigned** to a bus (the test conductor is unassigned, so real assignments are not disturbed), real Google
 sign-in, real email delivery, Firefox, Safari, and physical phones.
 
-## Current reference (after the idle-session security fix)
+## Current reference (after the idle-session and map-focus fixes)
 
-This is the result later refactoring phases should keep. The baseline above is kept as the record of the code before the fix.
+This is the result later refactoring phases should keep. The baseline above is kept as the record of the code before the fixes.
 
-- Production build: passed. `index.html` 0.35 kB, CSS 42.04 kB (unchanged), JS 486.16 kB (gzip 141.90 kB).
-- Smoke tests: **135 passed, 0 failed, 2 known issues reproduced**. The 18 added checks are in `session-idle.suite.mjs`.
-- Before the fix, the same idle suite gave 9 passed and 9 failed: page polling reset a 10-minute-idle session to 0.0 minutes.
+- Production build: passed. `index.html` 0.35 kB, CSS 42.04 kB (unchanged), JS 486.31 kB (gzip 141.95 kB).
+- Smoke tests: **157 passed, 0 failed, 0 known issues**.
 
-### Known issues (reproduced, not fixed)
+### Fixed since the baseline
 
-1. Returning to the Live map replays the last "show on map" alert focus.
-2. After log out, the next user in the same tab inherits the previous user's map focus. Cause: `mapFocus` in `App` is not cleared.
+1. **Idle session.** Page polling reset a 10-minute-idle session to 0.0 minutes. The idle suite gave 9 passed and 9 failed before the
+   fix and passes now (`session-idle.suite.mjs`).
+2. **Map focus leak.** Returning to the Live map replayed the last focus, and the next user in the same tab inherited it. The map focus
+   suite gave 20 passed and 7 failed before the fix and passes now (`map-focus.suite.mjs`).
