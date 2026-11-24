@@ -8,6 +8,7 @@ import AuthScreen from "./Auth.jsx";
 import { announceSessionChange, onSessionChange } from "./sessionSync.js";
 import { fmt, ago, timeFmt, dateTime, brief, coordText, initials } from "./utils/format.js";
 import { TRACK, BUS_STATUS, SEV, ASTATE } from "./utils/status.js";
+import { send, post, getJson } from "./services/http.js";
 
 // ONE Socket.IO connection for the whole page, shared by every screen that needs live data. Each screen calls joinSocket(), adds
 // its handlers with .on() and releases them with .disconnect() (which removes only ITS handlers). The real connection closes when the
@@ -50,10 +51,6 @@ const nextStopOf = (b, stops) => {
   (b.etas || []).forEach((e, i) => { if (e != null && (!best || e < best.eta)) best = { name: stops[i]?.name, eta: e }; });
   return best;
 };
-
-const send = (method, url, body = {}) =>
-  fetch(url, { method, headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify(body) });
-const post = (url, body) => send("POST", url, body);
 
 // Display names only. What a user may actually do is decided by the server;
 // the permission list it returns is used here just to show the right menu items.
@@ -1410,7 +1407,6 @@ function BusesPage({ onUnauthorized }) {
 // ---- Routes and bus stops ----
 // Same rules as Bus Management: administrators change records, dispatchers only look, passengers see only the map.
 // The server enforces it (routes:manage / stops:manage); hidden buttons just keep the screen consistent.
-const getJson = async (url) => { const r = await fetch(url, { credentials: "same-origin" }); return { status: r.status, ok: r.ok, body: await r.json().catch(() => null) }; };
 
 function Confirm({ title, children, label, busy, onCancel, onConfirm, danger = true }) {
   return (
