@@ -6,7 +6,7 @@ import { audit } from "./audit.js";
 
 const COOKIE = "rw_session";
 const SESSION_MS = Number(process.env.SESSION_MINUTES || 120) * 60_000; // absolute lifetime, not extended by activity
-const IDLE_S = Number(process.env.SESSION_IDLE_MINUTES || 30) * 60;      // ...and a session unused for this long ends too
+const IDLE_S = Number(process.env.SESSION_IDLE_MINUTES || 30) * 60;      // ...and a session with no user activity for this long ends too
 export const IS_PROD = process.env.NODE_ENV === "production";
 export const ALLOWED_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 
@@ -47,10 +47,11 @@ export const clearSessionCookie = (res) => res.append("Set-Cookie", `${COOKIE}=;
  * Identity comes from the server-side session; the role comes from the user store.
  * Nothing the client sends (body, headers, query) can set either of them.
  */
-export async function loadUser(req, { touch = false } = {}) {
+export async function loadUser(req) {
   const token = readCookie(req, COOKIE);
   req.sessionToken = token;
   req.user = null;
+  req.sessionTouchDue = false;
   if (!token || !TOKEN_RE.test(token)) return;
   // Valid = not past its absolute expiry AND used within the idle limit.
   const r = await query(
@@ -61,17 +62,29 @@ export async function loadUser(req, { touch = false } = {}) {
   if (!account) return;
   if (account.active && isRole(account.role)) {
     req.user = { username: account.username, role: account.role };
-    // An HTTP request is activity: move the idle deadline (at most once a minute, so requests do not each write).
-    if (touch && account.touch_due) await query("UPDATE sessions SET last_seen_at = now() WHERE token_hash = $1", [digest(token)]);
+    req.sessionTouchDue = !!account.touch_due; // acted on by touchSession, only for real activity
   } else await destroySession(token); // account deactivated, or holds no valid role
 }
 
 /** Express middleware. If the database cannot be reached the request is refused (fail closed), never treated as "signed out". */
 export function attachUser(req, res, next) {
-  loadUser(req, { touch: true }).then(() => next(), (e) => {
+  loadUser(req).then(() => next(), (e) => {
     console.error(`[auth] session lookup failed (${e.code || e.message})`);
     res.status(503).json({ error: "The service is temporarily unavailable. Please try again." });
   });
+}
+
+/**
+ * Moves the idle deadline, at most once a minute. Runs after csrfGuard. Only state-changing requests count as activity
+ * (including POST /api/session/activity, which the browser sends when a person interacts). GET requests do not count: the
+ * open pages poll them automatically, so counting them would keep an unattended session alive until its absolute limit.
+ * A failed write never fails the request: the identity check has already passed.
+ */
+export function touchSession(req, _res, next) {
+  if (!req.user || !req.sessionTouchDue || ["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
+  query("UPDATE sessions SET last_seen_at = now() WHERE token_hash = $1", [digest(req.sessionToken)])
+    .catch((e) => console.error(`[auth] session activity update failed (${e.code || e.message})`))
+    .finally(() => next());
 }
 
 /** 401 when not signed in. */

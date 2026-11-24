@@ -6,7 +6,7 @@ import { Server } from "socket.io";
 import { verifyCredentials, countUsers, findUser, findUserByLogin, listUsers, updateUser, USERNAME_RE, EMAIL_MAX } from "./users.js";
 import { registerAuthRoutes } from "./auth-routes.js";
 import {
-  ALLOWED_ORIGIN, attachUser, requireAuth, requirePermission, forbid, csrfGuard, securityHeaders,
+  ALLOWED_ORIGIN, attachUser, touchSession, requireAuth, requirePermission, forbid, csrfGuard, securityHeaders,
   createSession, destroySession, destroyUserSessions, setSessionCookie, clearSessionCookie, createLimiter, loadUser,
 } from "./auth.js";
 import { ROLES, can, isRole, permissionsFor } from "./permissions.js";
@@ -59,6 +59,7 @@ app.use(cors({ origin: ALLOWED_ORIGIN, credentials: true }));
 app.use(express.json({ limit: "2kb" }));
 app.use(attachUser);
 app.use(csrfGuard);
+app.use(touchSession); // real user activity moves the idle deadline; background polling does not
 const server = http.createServer(app);
 // Live bus positions are public and read-only (passengers can view the map without an account).
 // Operational detail goes only to the "staff" room, which a socket can join only through its

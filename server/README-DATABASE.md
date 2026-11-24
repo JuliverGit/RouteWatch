@@ -218,7 +218,7 @@ have a password or a Google identity.
 - Answers about email addresses never reveal whether an account exists; the address owner is informed by email instead.
 - Google: identified by Google's `sub` id. An existing account with the same email is **not** linked automatically (sign-in is refused with an explanation).
 - Password recovery ends every session of the account. Accounts without an email (all accounts that existed before 004) are reset by an administrator with `npm run reset-password -- <username>`.
-- Sessions end after `SESSION_MINUTES` (default 120) or `SESSION_IDLE_MINUTES` without requests (default 30).
+- Sessions end after `SESSION_MINUTES` (default 120) or `SESSION_IDLE_MINUTES` without user activity (default 30). Automatic page polling is not activity; clicks, typing, scrolling, taps and saved changes are.
 
 **Settings** (`server/.env`, see `.env.example`): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`; email delivery
 `MAIL_TRANSPORT=smtp` + `SMTP_*` + `MAIL_FROM` (needs `npm install --save-exact nodemailer@10.3.1`). Without SMTP, development uses

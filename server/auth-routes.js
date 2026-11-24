@@ -2,6 +2,7 @@
 // The existing POST /api/login, /api/logout and /api/me stay in index.js unchanged in behaviour.
 //
 //   GET  /api/auth/options               which sign-in methods are available (no secrets)
+//   POST /api/session/activity           a person is using the page: keeps the session from going idle (always 204)
 //   GET  /api/auth/google                start Google sign-in (redirect)
 //   GET  /api/auth/google/callback       Google returns here (GOOGLE_REDIRECT_URI)
 //   POST /api/auth/register              { username, email, password }        -> code emailed
@@ -44,6 +45,9 @@ export function registerAuthRoutes(app, { A, dropSockets }) {
     await destroySession(req.sessionToken); // a fresh session id after every sign-in
     setSessionCookie(res, await createSession(user));
   };
+
+  // The idle deadline itself is moved by touchSession. The same answer with or without a session, so it reveals nothing.
+  app.post("/api/session/activity", (req, res) => res.status(204).end());
 
   app.get("/api/auth/options", (req, res) => res.json({
     google: !!googleConfig(), email: mailAvailable(), devOutbox: mailMode() === "dev-outbox", codeMinutes: CODE_TTL_MINUTES,
