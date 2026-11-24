@@ -7,6 +7,7 @@ import { io } from "socket.io-client";
 import AuthScreen from "./Auth.jsx";
 import { announceSessionChange, onSessionChange } from "./sessionSync.js";
 import { fmt, ago, timeFmt, dateTime, brief, coordText, initials } from "./utils/format.js";
+import { TRACK, BUS_STATUS, SEV, ASTATE } from "./utils/status.js";
 
 // ONE Socket.IO connection for the whole page, shared by every screen that needs live data. Each screen calls joinSocket(), adds
 // its handlers with .on() and releases them with .disconnect() (which removes only ITS handlers). The real connection closes when the
@@ -39,10 +40,6 @@ function setSocketIdentity(name) {
 }
 import { Bus, Map as MapIcon, LayoutDashboard, LogOut, Bell, MapPin, Clock, Users, ScrollText, Radio, Route as RouteIcon, ArrowUp, ArrowDown, Ticket, Plus, Minus, Megaphone, CheckCheck, LocateFixed } from "lucide-react";
 
-// How fresh a bus position is (decided by the server): current, delayed, stale (last known) or unavailable.
-const TRACK = { current: { label: "Live", tone: "ok" }, delayed: { label: "Delayed", tone: "warn" }, stale: { label: "Last known", tone: "bad" }, unavailable: { label: "Unavailable", tone: "off" } };
-// Operational status of a bus (set by an administrator). This is NOT the GPS tracking status above.
-const BUS_STATUS = { active: { label: "Active", tone: "ok" }, maintenance: { label: "Under maintenance", tone: "warn" }, inactive: { label: "Inactive", tone: "off" } };
 const busIcon = (id, status, mine = false, selected = false) => L.divIcon({ className: "", html: `<div class="bus-pin bus-pin--${status}${mine ? " bus-pin--mine" : ""}${selected ? " bus-pin--sel" : ""}">${id.slice(-2)}</div>${mine ? '<span class="bus-tag">MY BUS</span>' : ""}`, iconSize: [32, 32], iconAnchor: [16, 16] });
 // The passenger's own position: a blue dot (drawn in CSS), clearly different from the round bus pins.
 const meIcon = L.divIcon({ className: "", html: '<div class="me-dot" aria-hidden="true"></div>', iconSize: [22, 22], iconAnchor: [11, 11] });
@@ -828,8 +825,6 @@ function CounterPage({ onUnauthorized }) {
 // ---- Service alerts and notifications (Phase 7) ----
 // An alert is written by an administrator or dispatcher; the SERVER decides who is notified and who may read it. These screens
 // only show what the server returns for the signed-in user (or visitor) and send the user's actions back.
-const SEV = { info: { tone: "info", label: "Information" }, warning: { tone: "warn", label: "Warning" }, critical: { tone: "bad", label: "Critical" } };
-const ASTATE = { draft: { tone: "off", label: "Draft" }, active: { tone: "ok", label: "Active" }, expired: { tone: "off", label: "Expired" }, resolved: { tone: "off", label: "Resolved" } };
 
 /** Buttons that jump to the bus, route or stop an alert is about (the map does the rest). */
 function AlertLinks({ alert, onFocus }) {
