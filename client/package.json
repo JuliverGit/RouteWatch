@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "test:smoke": "node tests/run.mjs"
   },
   "dependencies": {
     "leaflet": "^1.9.4",
