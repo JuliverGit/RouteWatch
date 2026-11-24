@@ -7,12 +7,14 @@ import AuthScreen from "./Auth.jsx";
 import { announceSessionChange, onSessionChange } from "./sessionSync.js";
 import { fmt, ago, timeFmt, dateTime, brief, coordText, initials } from "./utils/format.js";
 import { TRACK, BUS_STATUS, SEV, ASTATE } from "./utils/status.js";
-import { send, post, getJson } from "./services/http.js";
+import { send, post } from "./services/http.js";
 import { joinSocket, setSocketIdentity, reconnectIfDropped } from "./services/socket.js"; // the one shared Socket.IO connection
 import { Badge, OccBadge } from "./components/ui/Badge.jsx";
 import { State } from "./components/ui/State.jsx";
 import { Modal, Confirm } from "./components/ui/Modal.jsx";
 import { Field } from "./components/ui/Field.jsx";
+import { useStaffData } from "./hooks/useStaffData.js";
+import { useActiveAlerts } from "./hooks/useActiveAlerts.js";
 import { Bus, Map as MapIcon, LayoutDashboard, LogOut, Bell, MapPin, Clock, Users, ScrollText, Radio, Route as RouteIcon, ArrowUp, ArrowDown, Ticket, Plus, Minus, Megaphone, CheckCheck, LocateFixed } from "lucide-react";
 
 const busIcon = (id, status, mine = false, selected = false) => L.divIcon({ className: "", html: `<div class="bus-pin bus-pin--${status}${mine ? " bus-pin--mine" : ""}${selected ? " bus-pin--sel" : ""}">${id.slice(-2)}</div>${mine ? '<span class="bus-tag">MY BUS</span>' : ""}`, iconSize: [32, 32], iconAnchor: [16, 16] });
@@ -817,18 +819,6 @@ function AlertCard({ alert, onFocus, compact = false }) {
     </article>);
 }
 
-/** Active service alerts for the signed-in user or visitor. Reloads when the server says alerts changed (tick) and once a minute (expiry). */
-function useActiveAlerts(tick) {
-  const [alerts, setAlerts] = useState(null);
-  useEffect(() => {
-    let live = true;
-    const go = () => fetch("/api/alerts/active", { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (live && d && Array.isArray(d.alerts)) setAlerts(d.alerts); }).catch(() => {});
-    go(); const t = setInterval(go, 60000);
-    return () => { live = false; clearInterval(t); };
-  }, [tick]);
-  return alerts;
-}
-
 // ---- Notification center ----
 // The list, the unread count and the read marks all live on the server (PostgreSQL); this page asks for the user's own and shows them.
 function NotificationsPage({ notif, onRead, onReadAll, onFocus, onManage, reload }) {
@@ -1335,24 +1325,6 @@ function BusesPage({ onUnauthorized }) {
 // ---- Routes and bus stops ----
 // Same rules as Bus Management: administrators change records, dispatchers only look, passengers see only the map.
 // The server enforces it (routes:manage / stops:manage); hidden buttons just keep the screen consistent.
-
-/** Loads several staff endpoints together and polls them. Returns [data, error, reload]. */
-function useStaffData(urls, onUnauthorized, every = 8000) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-  const key = urls.join("|");
-  const load = useCallback(async () => {
-    try {
-      const rs = await Promise.all(key.split("|").map(getJson));
-      if (rs.some((r) => r.status === 401)) return onUnauthorized();
-      const bad = rs.find((r) => !r.ok || !r.body);
-      if (bad) return setError((bad.body && bad.body.error) || "The data could not be read.");
-      setData(rs.map((r) => r.body)); setError("");
-    } catch { setError("Cannot reach the server."); }
-  }, [key, onUnauthorized]);
-  useEffect(() => { load(); const t = setInterval(load, every); return () => clearInterval(t); }, [load, every]);
-  return [data, error, load];
-}
 
 /** Sends a change, then reports success or the server's message. Returns the parsed body on success, otherwise null. */
 async function change(method, url, body, onUnauthorized, setFeedback, okText) {
