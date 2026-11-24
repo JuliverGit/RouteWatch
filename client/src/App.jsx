@@ -5,8 +5,9 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import AuthScreen from "./Auth.jsx";
 import { announceSessionChange, onSessionChange } from "./sessionSync.js";
-import { fmt, ago, timeFmt, dateTime, brief, coordText, initials } from "./utils/format.js";
+import { fmt, ago, timeFmt, dateTime, coordText, initials } from "./utils/format.js";
 import { TRACK, BUS_STATUS, SEV, ASTATE } from "./utils/status.js";
+import { ROLE_LABEL, ROLES } from "./utils/roles.js";
 import { send, post } from "./services/http.js";
 import { joinSocket, setSocketIdentity, reconnectIfDropped } from "./services/socket.js"; // the one shared Socket.IO connection
 import { Badge, OccBadge } from "./components/ui/Badge.jsx";
@@ -15,7 +16,10 @@ import { Modal, Confirm } from "./components/ui/Modal.jsx";
 import { Field } from "./components/ui/Field.jsx";
 import { useStaffData } from "./hooks/useStaffData.js";
 import { useActiveAlerts } from "./hooks/useActiveAlerts.js";
-import { Bus, Map as MapIcon, LayoutDashboard, LogOut, Bell, MapPin, Clock, Users, ScrollText, Radio, Route as RouteIcon, ArrowUp, ArrowDown, Ticket, Plus, Minus, Megaphone, CheckCheck, LocateFixed } from "lucide-react";
+import { AlertCard } from "./components/alerts/AlertCard.jsx";
+import { Dashboard } from "./pages/common/DashboardPage.jsx";
+import { NotificationsPage } from "./pages/common/NotificationsPage.jsx";
+import { Bus, Map as MapIcon, LayoutDashboard, LogOut, Bell, MapPin, Clock, Users, ScrollText, Radio, Route as RouteIcon, ArrowUp, ArrowDown, Ticket, Plus, Minus, Megaphone, LocateFixed } from "lucide-react";
 
 const busIcon = (id, status, mine = false, selected = false) => L.divIcon({ className: "", html: `<div class="bus-pin bus-pin--${status}${mine ? " bus-pin--mine" : ""}${selected ? " bus-pin--sel" : ""}">${id.slice(-2)}</div>${mine ? '<span class="bus-tag">MY BUS</span>' : ""}`, iconSize: [32, 32], iconAnchor: [16, 16] });
 // The passenger's own position: a blue dot (drawn in CSS), clearly different from the round bus pins.
@@ -30,8 +34,6 @@ const nextStopOf = (b, stops) => {
 
 // Display names only. What a user may actually do is decided by the server;
 // the permission list it returns is used here just to show the right menu items.
-const ROLE_LABEL = { admin: "Administrator", dispatcher: "Dispatcher", conductor: "Conductor", passenger: "Passenger", guest: "Guest" };
-const ROLES = ["admin", "dispatcher", "conductor", "passenger"];
 const VIEWS = [
   { id: "dash", label: "Dashboard", Icon: LayoutDashboard, permission: null, group: "Monitoring" }, // everyone; the server decides which sections they receive
   { id: "counter", label: "Passenger counter", Icon: Ticket, permission: "occupancy:update", group: "Monitoring" }, // conductors only (the server checks the assignment)
@@ -527,183 +529,6 @@ function LiveMap({ canFleet, isConductor = false, isPassenger = false, focusToke
   );
 }
 
-// A value of null means "not available yet", which is shown differently from a real 0.
-function Stat({ label, value, note }) {
-  const unavailable = value == null;
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd className={unavailable ? "stat--na" : undefined}>
-        {unavailable ? <><span aria-hidden>–</span><span className="sr-only">Not available</span></> : value}
-      </dd>
-      {note && <dd className="stat__note">{note}</dd>}
-    </div>
-  );
-}
-
-function Panel({ id, title, aside, wide, children }) {
-  return (
-    <section className={`panel${wide ? " panel--wide" : ""}`} aria-labelledby={id}>
-      <div className="panel__head"><h2 id={id}>{title}</h2>{aside}</div>
-      {children}
-    </section>
-  );
-}
-
-// Shows only the sections the server sent. The server decides what each role receives
-// (see /api/dashboard), so this component never needs to know the role names.
-function Dashboard({ member, onUnauthorized, onNavigate, onViewer, onFocus, canManageAlerts = false, alertsTick = 0 }) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState("");
-  const load = useCallback(async () => {
-    try {
-      const r = await fetch("/api/dashboard", { credentials: "same-origin" });
-      const d = await r.json().catch(() => null);
-      const valid = d && d.route && Array.isArray(d.route.stops) && Array.isArray(d.alerts) && d.tracking;
-      if (!r.ok || !valid) return setError((d && d.error) || "The dashboard data could not be read.");
-      if (member && !d.viewer) return onUnauthorized(); // our session ended; the server now treats us as a visitor
-      if (d.viewer && onViewer) onViewer(d.viewer); // role changed by an administrator? let the menu follow
-      setData(d); setError("");
-    } catch { setError("Cannot reach the server."); }
-  }, [member, onUnauthorized, onViewer]);
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
-  useEffect(() => { if (alertsTick) load(); }, [alertsTick, load]); // an alert was published or resolved: show it now
-
-  if (!data) return error
-    ? <State title="Unable to load dashboard" text={error} action={<button className="btn" onClick={load}>Try again</button>} />
-    : (
-      <div className="dash" role="status" aria-busy="true" aria-label="Loading dashboard">
-        <div className="skel skel--title" /><div className="skel skel--stats" />
-        <div className="dash-grid"><div className="skel skel--panel" /><div className="skel skel--panel" /></div>
-        <span className="sr-only">Loading dashboard. Fetching the latest information.</span>
-      </div>);
-
-  const { route, alerts, tracking, fleet, users, activity } = data;
-  const simulated = tracking.source === "simulation";
-  const heading = users ? "System overview" : fleet ? "Operations overview" : "Passenger information";
-  const sub = users ? "Accounts, fleet status and recent security activity."
-    : fleet ? "Bus status and service conditions on your routes." : `Live bus information for ${route.name}.`;
-  const stats = users && fleet ? [
-    <Stat key="rb" label="Registered buses" value={fleet.registeredBuses} note={`${fleet.operation.active} in service`} />,
-    <Stat key="ab" label="Reporting now" value={tracking.activeBuses} note={simulated ? "Simulated" : undefined} />,
-    <Stat key="rt" label="Routes" value={fleet.routes.length} note={`${fleet.stops} stops`} />,
-    <Stat key="us" label="Registered users" value={users.total} note={`${users.active} active`} />,
-  ] : fleet ? [
-    <Stat key="ab" label="Active buses" value={tracking.activeBuses} note={simulated ? "Simulated" : undefined} />,
-    <Stat key="rt" label="Routes covered" value={fleet.routes.length} />,
-    <Stat key="al" label="Open alerts" value={alerts.length} />,
-  ] : [
-    <Stat key="ab" label="Buses in service" value={tracking.activeBuses} note={simulated ? "Simulated" : undefined} />,
-    <Stat key="st" label="Stops on route" value={route.stops.length} />,
-    <Stat key="km" label="Route length" value={route.lengthKm == null ? null : `${route.lengthKm} km`} />,
-  ];
-
-  return (
-    <div className="dash">
-      <div className="dash-head">
-        <div><h2>{heading}</h2><p className="muted">{sub}</p></div>
-        <div className="dash-head__meta">
-          {simulated && <Badge tone="warn">Simulated tracking data</Badge>}
-          <span className="muted">Updated {timeFmt(data.generatedAt)}</span>
-        </div>
-      </div>
-      {error && <p className="alert" role="alert">{error} Showing the last update.</p>}
-      <dl className="stats">{stats}</dl>
-
-      <div className="dash-grid">
-        {!fleet && (
-          <Panel id="h-track" title="Track buses">
-            <p className="muted">See where the buses are on the route right now.</p>
-            <button className="btn btn--primary" onClick={() => onNavigate("map")}><MapIcon size={16} aria-hidden /> Open live map</button>
-          </Panel>
-        )}
-        <OccupancyPanel initial={data.occupancy} />
-        <Panel id="h-svc" title="Service alerts" aside={canManageAlerts ? <button className="btn btn--sm" onClick={() => onNavigate("alerts")}>{users ? "Manage alerts" : "Create or manage alerts"}</button> : null}>
-          {!data.serviceAlerts || data.serviceAlerts.length === 0 ? <p className="muted">No active service alerts.</p>
-            : data.serviceAlerts.slice(0, 3).map((a) => <AlertCard key={a.id} alert={a} compact onFocus={onFocus} />)}
-          {data.serviceAlerts && data.serviceAlerts.length > 3 && <p className="panel__note">{data.serviceAlerts.length - 3} more on the Live map.</p>}
-        </Panel>
-        <Panel id="h-alerts" title="Live conditions">
-          {alerts.length ? alerts.map((a) => <p className="alert" key={a.id}>{a.text}</p>) : <p className="muted">No automatic warnings (full buses, lost signal).</p>}
-        </Panel>
-        {fleet && (
-          <Panel id="h-fleet" title="Bus status" wide aside={<>{simulated && <Badge tone="warn">Simulated</Badge>} {onNavigate && <button className="btn btn--sm" onClick={() => onNavigate("buses")}>Manage buses</button>}</>}>
-            {fleet.buses.length === 0 ? <p className="muted">No buses are registered yet.</p> : (
-              <div className="table-wrap" tabIndex={0} role="region" aria-label="Bus status table">
-                <table>
-                  <thead><tr><th scope="col">Bus</th><th scope="col">Route</th><th scope="col">Operation</th><th scope="col">Direction</th><th scope="col">Next stop</th><th scope="col">Tracking</th><th scope="col">Passengers</th></tr></thead>
-                  <tbody>{fleet.buses.map((b) => (
-                    <tr key={b.id}><td>{b.name}</td><td>{b.routeName ?? <span className="muted">No route</span>}</td><td><Badge tone={BUS_STATUS[b.operation]?.tone ?? "off"}>{BUS_STATUS[b.operation]?.label ?? b.operation}</Badge></td><td>{b.operation === "active" ? b.direction : "–"}</td><td>{b.nextStop ? `${b.nextStop.name} · ${fmt(b.nextStop.etaSeconds)}` : "–"}</td><td>{b.operation === "active" ? <Badge tone={TRACK[b.tracking]?.tone ?? "off"}>{b.status}</Badge> : <Badge tone="off">Not tracked</Badge>}</td><td><OccBadge occ={b.occupancy} />{b.conductor && <div className="muted small small--tight">Conductor: {b.conductor}</div>}</td></tr>))}
-                  </tbody>
-                </table>
-              </div>)}
-            {typeof tracking.unauthorizedAttempts === "number" && <p className="panel__note">Rejected device logins since the server started: {tracking.unauthorizedAttempts}.</p>}
-            
-          </Panel>
-        )}
-        <Panel id="h-route" title="Next arrivals" aside={simulated && <Badge tone="warn">Simulated</Badge>}>
-          <p className="panel__sub">{route.name}{route.lengthKm != null && ` · ${route.lengthKm} km`}</p>
-          {route.stops.map((s) => (
-            <div className="row" key={s.name}><span><MapPin size={14} aria-hidden /> {s.name}</span><strong>{fmt(s.etaSeconds)}</strong></div>))}
-          <p className="panel__note">Next arrival at each stop. A dash means no bus is currently approaching it.</p>
-        </Panel>
-        {users && (
-          <Panel id="h-accounts" title="Accounts" aside={<button className="btn btn--sm" onClick={() => onNavigate("users")}>Manage users</button>}>
-            {ROLES.map((r) => (
-              <div className="row" key={r}><span>{ROLE_LABEL[r]}s</span><strong>{users.byRole[r] ?? 0}</strong></div>))}
-            <div className="row"><span>Inactive accounts</span><strong>{users.total - users.active}</strong></div>
-          </Panel>
-        )}
-        {activity && (
-          <Panel id="h-activity" title="Recent activity" aside={<button className="btn btn--sm" onClick={() => onNavigate("audit")}>View audit log</button>}>
-            {activity.length === 0 ? <p className="muted">No activity recorded yet.</p> : (
-              <ul className="feed">{activity.map((e, i) => (
-                <li key={`${e.ts}-${i}`}>
-                  <span>
-                    <strong>{e.action.replaceAll("_", " ")}</strong>{" "}
-                    <span className="muted">{e.actor && e.target ? `${e.actor} → ${e.target}` : e.actor ?? e.target ?? ""}</span>{" "}
-                    {e.outcome !== "success" && <Badge tone={e.outcome === "denied" ? "bad" : "warn"}>{e.outcome}</Badge>}
-                  </span>
-                  <time dateTime={e.ts}>{timeFmt(e.ts)}</time>
-                </li>))}
-              </ul>)}
-          </Panel>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---- Passenger occupancy ----
-// Passengers and visitors only READ it. The numbers come from the server (kept by each bus's conductor); this panel never
-// calculates or guesses a count. A bus nobody is counting shows "Not reported". Changes arrive over Socket.IO ("occupancy").
-function OccupancyPanel({ initial }) {
-  const [rows, setRows] = useState(initial ?? []);
-  useEffect(() => { if (Array.isArray(initial)) setRows(initial); }, [initial]);
-  useEffect(() => {
-    const s = joinSocket();
-    s.on("occupancy", (o) => { if (o && o.busId) setRows((prev) => prev.map((r) => (r.busId === o.busId ? { ...r, ...o } : r))); });
-    return () => s.disconnect();
-  }, []);
-  return (
-    <Panel id="h-occ" title="Passenger occupancy">
-      {rows.length === 0 ? <p className="muted">No buses are in service.</p> : rows.map((r) => (
-        <div className="occ" key={r.busId}>
-          <div className="occ__head"><strong>{r.name}</strong><OccBadge occ={r} /></div>
-          <div className="muted small small--tight">{r.routeName ?? "No route assigned"}</div>
-          {r.reported ? (
-            <>
-              <progress className={`meter meter--${r.level}`} value={r.count} max={r.capacity} aria-label={`${r.name}: ${r.count} of ${r.capacity} seats taken`} />
-              <div className="occ__nums"><span>{r.count} of {r.capacity} passengers</span><strong>{r.available} {r.available === 1 ? "seat" : "seats"} available</strong></div>
-              <div className="muted small small--tight">Updated {r.updatedAt ? timeFmt(r.updatedAt) : "–"}</div>
-            </>
-          ) : <p className="muted small small--tight">Not reported. No conductor is counting passengers on this bus right now.</p>}
-        </div>))}
-      <p className="panel__note">Counts are entered by each bus's conductor and may differ slightly from the real number on board.</p>
-    </Panel>
-  );
-}
-
 // ---- Conductor: passenger counter ----
 // Mobile-first. The conductor taps + when a passenger boards and - when one gets off. The screen never sends a number:
 // it tells the server what happened, and shows whatever count the server answers with. Taps are sent one after another,
@@ -786,100 +611,6 @@ function CounterPage({ onUnauthorized }) {
         </Confirm>)}
     </div>
   );
-}
-
-// ---- Service alerts and notifications (Phase 7) ----
-// An alert is written by an administrator or dispatcher; the SERVER decides who is notified and who may read it. These screens
-// only show what the server returns for the signed-in user (or visitor) and send the user's actions back.
-
-/** Buttons that jump to the bus, route or stop an alert is about (the map does the rest). */
-function AlertLinks({ alert, onFocus }) {
-  if (!onFocus || !(alert.busId || alert.routeId || alert.stopId)) return null;
-  return (
-    <div className="alertcard__links">
-      {alert.busId && <button className="btn btn--sm" onClick={() => onFocus("bus", alert.busId)} aria-label={`Show bus ${alert.busName ?? alert.busId} on the map`}><Bus size={14} aria-hidden /> {alert.busName ?? alert.busId}</button>}
-      {alert.routeId && <button className="btn btn--sm" onClick={() => onFocus("route", alert.routeId)} aria-label={`Show route ${alert.routeName ?? alert.routeId} on the map`}><RouteIcon size={14} aria-hidden /> {alert.routeName ?? alert.routeId}</button>}
-      {alert.stopId && <button className="btn btn--sm" onClick={() => onFocus("stop", alert.stopId)} aria-label={`Show stop ${alert.stopName ?? alert.stopId} on the map`}><MapPin size={14} aria-hidden /> {alert.stopName ?? alert.stopId}</button>}
-    </div>);
-}
-
-function AlertCard({ alert, onFocus, compact = false }) {
-  return (
-    <article className={`alertcard alertcard--${alert.severity}`}>
-      <div className="alertcard__head">
-        <Badge tone={SEV[alert.severity]?.tone ?? "off"}>{SEV[alert.severity]?.label ?? alert.severity}</Badge>
-        <span className="muted small">{alert.categoryLabel}</span>
-        {alert.audience === "staff" && <Badge tone="off">Staff only</Badge>}
-        {alert.state !== "active" && <Badge tone={ASTATE[alert.state]?.tone ?? "off"}>{ASTATE[alert.state]?.label ?? alert.state}</Badge>}
-      </div>
-      <h3 className="alertcard__title">{alert.title}</h3>
-      <p className="alertcard__text">{compact ? brief(alert.description) : alert.description}</p>
-      <div className="muted small small--tight">{alert.publishedAt ? `Published ${dateTime(alert.publishedAt)}` : ""}{alert.expiresAt ? ` · Until ${dateTime(alert.expiresAt)}` : ""}</div>
-      <AlertLinks alert={alert} onFocus={onFocus} />
-    </article>);
-}
-
-// ---- Notification center ----
-// The list, the unread count and the read marks all live on the server (PostgreSQL); this page asks for the user's own and shows them.
-function NotificationsPage({ notif, onRead, onReadAll, onFocus, onManage, reload }) {
-  const [filter, setFilter] = useState("all");
-  const [open, setOpen] = useState(() => new Set());
-  const items = notif.items;
-  if (!items) return notif.error ? <State title="Unable to load notifications" text={notif.error} action={<button className="btn" onClick={reload}>Try again</button>} /> : <State title="Loading" text="Fetching your notifications…" />;
-  const shown = items.filter((n) => filter === "all" || !n.read);
-  const toggle = (n) => {
-    setOpen((p) => { const q = new Set(p); q.has(n.id) ? q.delete(n.id) : q.add(n.id); return q; });
-    if (!n.read) onRead(n.id); // opening the details counts as reading it
-  };
-  return (
-    <div className="dash">
-      <section className="panel" aria-labelledby="h-notif">
-        <div className="panel__head">
-          <h2 id="h-notif">Your notifications</h2>
-          <span className="muted" role="status">{notif.unread === 0 ? "All read" : `${notif.unread} unread`}</span>
-        </div>
-        <div className="toolbar">
-          <label className="sr-only" htmlFor="notif-filter">Show</label>
-          <select id="notif-filter" value={filter} onChange={(e) => setFilter(e.target.value)}><option value="all">All notifications</option><option value="unread">Unread only</option></select>
-          <button className="btn" onClick={onReadAll} disabled={notif.unread === 0}><CheckCheck size={16} aria-hidden /> Mark all as read</button>
-        </div>
-        {notif.error && <p className="alert" role="alert">{notif.error} Showing the last update.</p>}
-        {items.length === 0 ? <div className="state"><h2>No notifications yet</h2><p>Service alerts that concern you will appear here.</p></div>
-          : shown.length === 0 ? <div className="state"><h2>Nothing unread</h2><p>You have read everything. Choose "All notifications" to see earlier ones.</p></div>
-          : (
-            <ul className="notiflist">
-              {shown.map((n) => {
-                const a = n.alert, isOpen = open.has(n.id);
-                return (
-                  <li key={n.id} className={`notif notif--${a.severity}${n.read ? "" : " notif--unread"}`}>
-                    <div className="notif__head">
-                      <span className={`notif__dot${n.read ? "" : " notif__dot--on"}`} aria-hidden />
-                      <Badge tone={SEV[a.severity]?.tone ?? "off"}>{SEV[a.severity]?.label ?? a.severity}</Badge>
-                      <span className="muted small">{a.categoryLabel}</span>
-                      {a.state !== "active" && <Badge tone={ASTATE[a.state]?.tone ?? "off"}>{ASTATE[a.state]?.label ?? a.state}</Badge>}
-                      <span className="notif__status">{n.read ? "Read" : "Unread"}</span>
-                      <time className="muted small notif__time" dateTime={n.receivedAt}>{dateTime(n.receivedAt)}</time>
-                    </div>
-                    <h3 className="notif__title">{a.title}</h3>
-                    <p className="notif__text">{isOpen ? a.description : brief(a.description)}</p>
-                    {isOpen && (
-                      <dl className="facts notif__more">
-                        <div><dt>Status</dt><dd>{ASTATE[a.state]?.label ?? a.state}</dd></div>
-                        {a.publishedAt && <div><dt>Published</dt><dd>{dateTime(a.publishedAt)}</dd></div>}
-                        {a.expiresAt && <div><dt>{a.state === "expired" ? "Expired" : "Valid until"}</dt><dd>{dateTime(a.expiresAt)}</dd></div>}
-                        {a.createdBy && <div><dt>Published by</dt><dd>{a.publishedBy ?? a.createdBy}</dd></div>}
-                      </dl>)}
-                    <div className="notif__actions">
-                      <button className="btn btn--sm" aria-expanded={isOpen} onClick={() => toggle(n)}>{isOpen ? "Hide details" : "View details"}</button>
-                      {!n.read && <button className="btn btn--sm" onClick={() => onRead(n.id)}>Mark as read</button>}
-                      <AlertLinks alert={a} onFocus={(k, id) => { if (!n.read) onRead(n.id); onFocus(k, id); }} />
-                      {onManage && <button className="btn btn--sm" onClick={onManage}>Open in Service alerts</button>}
-                    </div>
-                  </li>);
-              })}
-            </ul>)}
-      </section>
-    </div>);
 }
 
 // ---- Service alert management (administrators and dispatchers) ----
