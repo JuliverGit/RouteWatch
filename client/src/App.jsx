@@ -5,6 +5,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { io } from "socket.io-client";
 import AuthScreen from "./Auth.jsx";
+import { announceSessionChange, onSessionChange } from "./sessionSync.js";
 
 // ONE Socket.IO connection for the whole page, shared by every screen that needs live data. Each screen calls joinSocket(), adds
 // its handlers with .on() and releases them with .disconnect() (which removes only ITS handlers). The real connection closes when the
@@ -1949,7 +1950,7 @@ function AuditPage({ onUnauthorized }) {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  setSocketIdentity(user && user.role !== "guest" ? user.username : ""); // the live connection must carry the identity of whoever is signed in now (guests and signed-out are the same: no session)
+  setSocketIdentity(user && user.role !== "guest" ? `${user.username}\u0000${user.role}` : ""); // the live connection must carry the identity of whoever is signed in now (guests and signed-out are the same: no session); a new role reconnects too, because the server decides the rooms when connecting
   const [view, setView] = useState("dash");
   const [notif, setNotif] = useState({ unread: 0, items: null, error: "" }); // the signed-in user's own notifications (kept in PostgreSQL by the server)
   const [alertsTick, setAlertsTick] = useState(0);  // bumped when the server says the alerts changed, so lists reload
@@ -1962,7 +1963,8 @@ export default function App() {
   // Notifications belong to one identity. Reset while rendering (not in an effect), so a frame with the previous user's content is never painted.
   // Clearing the toast also cancels its dismissal timer (the cleanup of the toast effect below).
   // `epoch` numbers each identity on screen, so a response can be tied to the one that asked for it, even when the same user signs in again.
-  const identity = user?.username ?? null;
+  // The role is part of the identity: data loaded under a previous role (for example staff data after a demotion) is dropped too.
+  const identity = user ? `${user.username}\u0000${user.role}` : null;
   const [session, setSession] = useState({ identity, epoch: 0 });
   const epoch = session.identity === identity ? session.epoch : session.epoch + 1;
   const epochRef = useRef(epoch);
@@ -1990,12 +1992,62 @@ export default function App() {
       .finally(() => { if (confirmingExpiry.current === epoch) confirmingExpiry.current = null; });
   }, [epoch, endSession]);
 
+  // Asks the server who this tab is signed in as, and follows the answer: another account, another role, signed out, or a sign-in made in
+  // another tab. Only the server's answer counts; whatever prompted the check carries no identity. One check at a time; a prompt that
+  // arrives meanwhile runs one more afterwards, so a change made after the request was sent is not missed.
+  const userRef = useRef(user);
+  userRef.current = user;
+  const sessionCheck = useRef({ busy: false, again: false, last: 0 });
+  const checkSession = useCallback(function run() {
+    const c = sessionCheck.current;
+    if (c.busy) { c.again = true; return; }
+    c.busy = true; c.again = false; c.last = Date.now();
+    const asked = epochRef.current;
+    fetch("/api/me", { credentials: "same-origin" })
+      .then(async (r) => {
+        if (epochRef.current !== asked) return; // this tab changed account itself in the meantime
+        const shown = userRef.current, member = !!shown && shown.role !== "guest";
+        if (r.status === 401) { if (member) endSession("You were signed out. Please sign in again."); return; }
+        if (!r.ok) return;
+        const u = await r.json();
+        if (epochRef.current !== asked) return;
+        // The server may have ended our live connection although nothing changed in the end (a role changed and changed back): connect again.
+        // When the account or role did change, the new identity reconnects it anyway (setSocketIdentity).
+        if (shown && shown.username === u.username && shown.role === u.role && sharedSocket && !sharedSocket.active && sharedUsers > 0) sharedSocket.connect();
+        setUser((prev) => (prev && JSON.stringify(prev) === JSON.stringify(u) ? prev : u));
+        if (!member) { setNotice(""); setView("dash"); } // a sign-in made in another tab
+      })
+      .catch(() => {}) // server unreachable: change nothing; the next prompt or the minute check decides
+      .finally(() => { c.busy = false; if (c.again) run(); });
+  }, [endSession]);
+
+  // Prompts: another tab signed in or out; this tab is shown, focused, resumed after being suspended, restored from the back/forward
+  // cache, or back online. Tab activity is limited to one check every 3 seconds; messages from other tabs are always checked.
+  useEffect(() => {
+    const wake = () => { if (document.visibilityState === "visible" && Date.now() - sessionCheck.current.last > 3000) checkSession(); };
+    const shown = (e) => { if (e.persisted) checkSession(); };
+    document.addEventListener("visibilitychange", wake);
+    document.addEventListener("resume", wake);
+    window.addEventListener("focus", wake);
+    window.addEventListener("online", wake);
+    window.addEventListener("pageshow", shown);
+    const stop = onSessionChange(checkSession);
+    return () => {
+      document.removeEventListener("visibilitychange", wake);
+      document.removeEventListener("resume", wake);
+      window.removeEventListener("focus", wake);
+      window.removeEventListener("online", wake);
+      window.removeEventListener("pageshow", shown);
+      stop();
+    };
+  }, [checkSession]);
+
   // Restore an existing server session (e.g. after a page refresh).
   useEffect(() => {
     let live = true;
     fetch("/api/me", { credentials: "same-origin" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((u) => { if (live && u) setUser(u); })
+      .then((u) => { if (live && u) { setUser(u); announceSessionChange(); } }) // a tab opened after a sign-in elsewhere (or a Google sign-in) lets the others check
       .catch(() => {})
       .finally(() => { if (live) setChecking(false); });
     return () => { live = false; };
@@ -2024,7 +2076,7 @@ export default function App() {
   }, [user, epoch]);
 
   const logout = async () => {
-    if (isMember) { try { await post("/api/logout"); } catch { /* the cookie also expires on its own */ } }
+    if (isMember) { try { await post("/api/logout"); } catch { /* the cookie also expires on its own */ } announceSessionChange(); }
     endSession();
   };
 
@@ -2053,8 +2105,9 @@ export default function App() {
     });
     sock.on("notification:read", () => loadNotif()); // another tab of this user read something
     sock.on("alerts:changed", () => { setAlertsTick((n) => n + 1); loadNotif(); }); // an alert was published, edited or resolved: lists and the notification states refresh
+    sock.on("disconnect", (reason) => { if (reason === "io server disconnect") checkSession(); }); // the server ended our connection (sign-out, deactivation, role change): ask who we are now
     return () => sock.disconnect();
-  }, [user?.username, loadNotif]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.username, loadNotif, checkSession]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 6000); return () => clearTimeout(t); }, [toast]);
   const readOne = async (id) => {
     setNotif((p) => ({ ...p, items: p.items && p.items.map((n) => (n.id === id ? { ...n, read: true } : n)), unread: p.items && p.items.some((n) => n.id === id && !n.read) ? Math.max(0, p.unread - 1) : p.unread }));
@@ -2069,7 +2122,7 @@ export default function App() {
   const showOnMap = (kind, id) => { setMapFocus({ kind, id, token: Date.now() }); setView("map"); };
 
   if (checking) return <main className="auth"><State title="Loading" text="Checking your session…" /></main>;
-  if (!user) return <Login notice={notice} onLogin={(u) => { setUser(u); setNotice(""); setView("dash"); }} onGuest={() => setUser({ username: "Guest", role: "guest", permissions: [] })} />;
+  if (!user) return <Login notice={notice} onLogin={(u) => { setUser(u); setNotice(""); setView("dash"); announceSessionChange(); }} onGuest={() => setUser({ username: "Guest", role: "guest", permissions: [] })} />;
 
   const isConductor = (user.permissions ?? []).includes("occupancy:update");
   const allowed = (v) => (!v.permission || (user.permissions ?? []).includes(v.permission)) && (!v.member || isMember);

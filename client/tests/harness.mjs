@@ -60,9 +60,9 @@ class Browser {
   async stop() { try { this.ws?.close(); } catch { /* closing anyway */ } if (this.proc?.pid) await new Promise((r) => { const k = spawn("taskkill", ["/PID", String(this.proc.pid), "/T", "/F"], { stdio: "ignore" }); k.on("close", r); k.on("error", r); }); }
 
   /** A fresh, isolated browser profile (own cookies) with one page. */
-  async open({ width = 1366, height = 860, mobile = false, geolocation = null } = {}) {
-    const { browserContextId } = await this.send("Target.createBrowserContext", { disposeOnDetach: true });
-    if (geolocation) await this.send("Browser.setPermission", { permission: { name: "geolocation" }, setting: geolocation, origin: APP, browserContextId });
+  async open({ width = 1366, height = 860, mobile = false, geolocation = null, context = null } = {}) {
+    const browserContextId = context ?? (await this.send("Target.createBrowserContext", { disposeOnDetach: true })).browserContextId;
+    if (geolocation && !context) await this.send("Browser.setPermission", { permission: { name: "geolocation" }, setting: geolocation, origin: APP, browserContextId });
     const { targetId } = await this.send("Target.createTarget", { url: "about:blank", browserContextId });
     const { sessionId } = await this.send("Target.attachToTarget", { targetId, flatten: true });
     const p = { errors: [], sockets: [], requests: [] };
@@ -87,7 +87,10 @@ class Browser {
     p.realClick = async (x, y) => { for (const type of ["mousePressed", "mouseReleased"]) await p.s("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 }); };
     p.goto = (url = APP) => p.s("Page.navigate", { url });
     p.reload = () => p.s("Page.reload");
-    p.close = () => this.send("Target.disposeBrowserContext", { browserContextId });
+    // A tab opened with p.newTab() shares this profile (cookies, BroadcastChannel). Closing the first page closes all of its tabs.
+    p.close = () => (context ? this.send("Target.closeTarget", { targetId }) : this.send("Target.disposeBrowserContext", { browserContextId }));
+    p.newTab = (o = {}) => this.open({ width, height, mobile, ...o, context: browserContextId });
+    p.targetId = targetId;
     /** Signs in through the real sign-in form. */
     p.signIn = async (a) => {
       await p.waitFor("!!document.querySelector('#au-id')");

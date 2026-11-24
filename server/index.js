@@ -682,6 +682,9 @@ app.patch("/api/users/:username", requirePermission("users:manage"), async (req,
     if ("active" in changes && before.active !== after.active)
       audit({ action: after.active ? "user_activated" : "user_deactivated", actor: req.user.username, role: req.user.role, target: name, ip: req.ip });
     if (!after.active) { await destroyUserSessions(name); await dropSockets((s) => s.data.user === name); }
+    // The session stays valid (the role is re-read on every request), but a live connection joins its rooms (such as "staff") only when it
+    // connects. End the user's connections so they reconnect with the new role; the browser also takes this as a prompt to re-check the account.
+    else if ("role" in changes && before.role !== after.role) await dropSockets((s) => s.data.user === name);
     res.json(after);
   } catch (e) { next(e); }
 });

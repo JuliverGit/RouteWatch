@@ -41,12 +41,12 @@ Recorded 2026-11-24 on Windows 11, Node 24.15.0, Microsoft Edge 158.0.4370.33, P
 Not covered: a conductor **assigned** to a bus (the test conductor is unassigned, so real assignments are not disturbed), real Google
 sign-in, real email delivery, Firefox, Safari, and physical phones.
 
-## Current reference (after the idle-session, map-focus, notification-session, late-response and stale-data fixes)
+## Current reference (after the idle-session, map-focus, notification-session, late-response, stale-data and cross-tab fixes)
 
 This is the result later refactoring phases should keep. The baseline above is kept as the record of the code before the fixes.
 
-- Production build: passed. `index.html` 0.35 kB, CSS 42.04 kB (unchanged), JS 487.04 kB (gzip 142.17 kB).
-- Smoke tests: **281 passed, 0 failed, 0 known issues**.
+- Production build: passed. `index.html` 0.35 kB, CSS 42.04 kB (unchanged), JS 489.00 kB (gzip 142.86 kB).
+- Smoke tests: **309 passed, 0 failed, 0 known issues**. A complete run now takes a little over 10 minutes.
 - The tests now also create a second temporary admin and a second temporary conductor (`rwt-adm2-*`, `rwt-con2-*`), deleted afterwards.
 
 ### Fixed since the baseline
@@ -65,3 +65,7 @@ This is the result later refactoring phases should keep. The baseline above is k
    the previous account's data, and its delayed responses could still replace the new account's data (for example staff dashboard
    sections shown to a passenger). Before the fix the suite gave 49 passed and 10 failed, on all nine data pages. It now passes 59 of
    59 (`stale-data.suite.mjs`). Responses are labelled inside the page, and the conductors' assigned bus is made up there too.
+6. **Other tabs followed a sign-in change only after up to 60 seconds**, and a role change only through that check or the dashboard.
+   A demoted staff member's open live connection also stayed in the staff room. On the previous client code its first 27 checks gave
+   17 passed and 10 failed (the 28th, a role changed and changed back, fails without the reconnect). It now passes 28 of 28 (`cross-tab.suite.mjs`), with two real tabs of one browser profile. Missed and late
+   messages, and a held session check, are simulated inside the observing tab.
