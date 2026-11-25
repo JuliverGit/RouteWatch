@@ -2,7 +2,6 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import "leaflet/dist/leaflet.css";
 import AuthScreen from "./Auth.jsx";
 import { announceSessionChange, onSessionChange } from "./sessionSync.js";
-import { initials } from "./utils/format.js";
 import { ROLE_LABEL } from "./utils/roles.js";
 import { send, post } from "./services/http.js";
 import { joinSocket, setSocketIdentity, reconnectIfDropped } from "./services/socket.js"; // the one shared Socket.IO connection
@@ -18,22 +17,8 @@ import { AuditPage } from "./pages/admin/AuditPage.jsx";
 import { CounterPage } from "./pages/conductor/CounterPage.jsx";
 import { ConductorHome } from "./pages/conductor/ConductorHome.jsx";
 import { LiveMap } from "./pages/map/LiveMap.jsx";
-import { Bus, Map as MapIcon, LayoutDashboard, LogOut, Bell, MapPin, Users, ScrollText, Route as RouteIcon, Ticket, Megaphone } from "lucide-react";
-
-// Display names only. What a user may actually do is decided by the server;
-// the permission list it returns is used here just to show the right menu items.
-const VIEWS = [
-  { id: "dash", label: "Dashboard", Icon: LayoutDashboard, permission: null, group: "Monitoring" }, // everyone; the server decides which sections they receive
-  { id: "counter", label: "Passenger counter", Icon: Ticket, permission: "occupancy:update", group: "Monitoring" }, // conductors only (the server checks the assignment)
-  { id: "map", label: "Live map", Icon: MapIcon, permission: null, group: "Monitoring" },
-  { id: "notifications", label: "Notifications", Icon: Bell, permission: null, member: true, group: "Monitoring" }, // signed-in users only; each sees only their own
-  { id: "alerts", label: "Service alerts", Icon: Megaphone, permission: "alerts:manage", group: "Operations" }, // administrators and dispatchers
-  { id: "buses", label: "Buses", Icon: Bus, permission: "buses:read", group: "Fleet" },
-  { id: "routes", label: "Routes", Icon: RouteIcon, permission: "routes:read", group: "Fleet" },
-  { id: "stops", label: "Bus stops", Icon: MapPin, permission: "stops:read", group: "Fleet" },
-  { id: "users", label: "Users", Icon: Users, permission: "users:read", group: "Administration" },
-  { id: "audit", label: "Audit log", Icon: ScrollText, permission: "audit:read", group: "Administration" },
-];
+import { VIEWS } from "./routes/views.js";
+import { AppShell } from "./layouts/AppShell.jsx";
 
 // Sign-in, registration, email verification and password recovery live in Auth.jsx (same props as before).
 const Login = (props) => <AuthScreen {...props} />;
@@ -235,33 +220,10 @@ export default function App() {
     : current.id === "users" ? <UsersPage me={user} onUnauthorized={expire} />
     : <AuditPage onUnauthorized={expire} />;
   return (
-    <div className="shell">
-      <nav className="rail" aria-label="Main">
-        <div className="brand"><span className="brand__mark"><Bus size={20} aria-hidden /></span>RouteWatch</div>
-        <div className="rail__links">
-          {[...new Set(nav.map((v) => v.group))].map((g) => (
-            <div className="rail__group" key={g} role="group" aria-label={g}>
-              <span className="rail__heading" aria-hidden>{g}</span>
-              {nav.filter((v) => v.group === g).map(({ id, label, Icon }) => (
-                <button key={id} className="rail__link" aria-current={view === id ? "page" : undefined} onClick={() => setView(id)} aria-label={label} title={label}><Icon size={18} aria-hidden /><span className="rail__text">{label}</span></button>))}
-            </div>))}
-        </div>
-        <div className="rail__user"><span className="avatar" aria-hidden>{initials(user.username)}</span><span className="rail__who"><strong>{user.username}</strong><br /><span className="muted">{ROLE_LABEL[user.role] ?? user.role}</span></span>
-          <button className="btn btn--icon" onClick={logout} aria-label={isMember ? "Log out" : "Back to sign in"}><LogOut size={18} aria-hidden /></button></div>
-      </nav>
-      <main className="main">
-        <header className="topbar"><h1>{current.label}</h1>
-          <span className="topbar__end"><span className="muted">Villanueva – CDO route</span>
-            {isMember && (
-              <button className="bell" onClick={() => setView("notifications")} aria-label={notif.unread > 0 ? `Notifications, ${notif.unread} unread` : "Notifications, none unread"} title="Notifications">
-                <Bell size={18} aria-hidden />{notif.unread > 0 && <span className="bell__count" aria-hidden>{notif.unread > 99 ? "99+" : notif.unread}</span>}
-              </button>)}
-          </span></header>
-        {toast && <div className="toast" role="status"><button className="toast__btn" onClick={() => { setToast(""); setView("notifications"); }}>{toast}</button></div>}
-        {/* Page data belongs to one identity: a new `epoch` replaces the page in the same render that shows the new account,
-            so the previous account's data is never painted and its late responses reach an unmounted page (React drops them). */}
-        <Fragment key={epoch}>{page}</Fragment>
-      </main>
-    </div>
+    <AppShell user={user} isMember={isMember} nav={nav} view={view} setView={setView} current={current} notif={notif} toast={toast} setToast={setToast} logout={logout}>
+      {/* Page data belongs to one identity: a new `epoch` replaces the page in the same render that shows the new account,
+          so the previous account's data is never painted and its late responses reach an unmounted page (React drops them). */}
+      <Fragment key={epoch}>{page}</Fragment>
+    </AppShell>
   );
 }
